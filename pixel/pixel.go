@@ -25,8 +25,8 @@ func Interpolate(left, right Pixel, t float64) Pixel {
 
 func (p Pixel) ToBuffer() *bytes.Buffer {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, byte(p.Red * 255))
-	binary.Write(buf, binary.BigEndian, byte(p.Green * 255))
-	binary.Write(buf, binary.BigEndian, byte(p.Blue * 255))
+	binary.Write(buf, binary.BigEndian, byte(p.Red*255))
+	binary.Write(buf, binary.BigEndian, byte(p.Green*255))
+	binary.Write(buf, binary.BigEndian, byte(p.Blue*255))
 	return buf
 }

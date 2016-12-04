@@ -1,23 +1,40 @@
 package shader
 
-
 import (
-	"runtime"
-	"github.com/go-gl/gl/v4.1-core/gl"
-	"github.com/go-gl/glfw/v3.1/glfw"
-	"log"
-	"fmt"
-	"strings"
-	"os"
 	"bufio"
+	"encoding/binary"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"runtime"
+	"strings"
+	"time"
+
+	//"github.com/brodo/go-opc/display"
+	"../display"
+	"github.com/brodo/go-opc/message"
+	"github.com/brodo/go-opc/pixel"
+	"github.com/go-gl/gl/v4.1-core/gl"
+	"github.com/go-gl/glfw/v3.2/glfw"
 )
+
+const SCALE_X = 4
+const SCALE_Y = 4
+
+const RES_X = 32
+const RES_Y = 32
+
+const FB_RES_X = SCALE_X * RES_X
+const FB_RES_Y = SCALE_Y * RES_Y
+
+var pixels = make([]byte, FB_RES_X*FB_RES_Y*4)
 
 func init() {
 	runtime.LockOSThread()
 }
 
 func Start() {
-
 	// Initialize glfw
 	if err := glfw.Init(); err != nil {
 		log.Fatal(err)
@@ -26,19 +43,17 @@ func Start() {
 
 	// Window hints
 	glfw.WindowHint(glfw.Resizable, glfw.True)
-	glfw.WindowHint(glfw.ContextVersionMajor, 4)
-	glfw.WindowHint(glfw.ContextVersionMinor, 1)
+	glfw.WindowHint(glfw.ContextVersionMajor, 3)
+	glfw.WindowHint(glfw.ContextVersionMinor, 2)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
 
 	// Create window
-	window, err := glfw.CreateWindow(128, 128, "Window", nil, nil)
+	window, err := glfw.CreateWindow(FB_RES_X, FB_RES_Y, "Window", nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	window.MakeContextCurrent()
-
-	window.get
 
 	// Initialize gl
 	if err := gl.Init(); err != nil {
@@ -55,7 +70,7 @@ func Start() {
 		-1.0, -1.0, 0.0,
 		-1.0, -1.0, 0.0,
 		1.0, -1.0, 0.0,
-		1.0, 1.0, 0.0 }
+		1.0, 1.0, 0.0}
 
 	// Create Vertex array object
 	var vertexArrayID uint32
@@ -65,13 +80,18 @@ func Start() {
 	var vertexBuffer uint32
 	gl.GenBuffers(1, &vertexBuffer)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
-	gl.BufferData(gl.ARRAY_BUFFER, len(vertexBufferData) * 4, gl.Ptr(vertexBufferData), gl.STATIC_DRAW)
+	gl.BufferData(gl.ARRAY_BUFFER, len(vertexBufferData)*4, gl.Ptr(vertexBufferData), gl.STATIC_DRAW)
 
 	gl.ClearColor(1.0, 1.0, 1.0, 1.0)
 	// load shaders
 	programID, err := newProgram("shader/vertexShader.vertexshader", "shader/fragmentShader.fragmentshader")
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	conn, err := net.Dial("tcp", "10.23.42.141:7890")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Could not connect to server")
 	}
 
 	gl.ClearColor(0.11, 0.545, 0.765, 0.0)
@@ -89,6 +109,24 @@ func Start() {
 		gl.DrawArrays(gl.TRIANGLES, 0, 6)
 
 		gl.DisableVertexAttribArray(0)
+
+		gl.ReadPixels(0, 0, FB_RES_X, FB_RES_Y, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(pixels))
+
+		for x := 0; x < RES_X; x++ {
+			for y := 0; y < RES_Y; y++ {
+				pixel := pixel.Pixel{0, 0, 0}
+				buf_pos := y*SCALE_Y*FB_RES_X*4 + x*SCALE_X*4
+				pixel.Red = float64(pixels[buf_pos]) / 255.0
+				pixel.Green = float64(pixels[buf_pos+1]) / 255.0
+				pixel.Blue = float64(pixels[buf_pos+2]) / 255.0
+				display.SetPixel(pixel, x, y)
+			}
+		}
+
+		msg := message.EmptyMessage()
+		msg.SetData(display.GetBuffer().Bytes())
+		binary.Write(conn, binary.BigEndian, msg.ToBytes())
+		time.Sleep(4 * time.Millisecond)
 
 		// Maintenance
 		window.SwapBuffers()
@@ -136,7 +174,6 @@ func newProgram(vertexFilePath, fragmentFilePath string) (uint32, error) {
 	return programID, nil
 }
 
-
 // Load both shaders and return
 func loadShaders(vertexFilePath, fragmentFilePath string) (uint32, uint32, error) {
 
@@ -179,7 +216,6 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 
 		fmt.Errorf("failed to compile %v: %v", source, log)
 	}
-
 
 	return shader, nil
 }
