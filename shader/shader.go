@@ -38,7 +38,7 @@ func Start() {
 	}
 	window.MakeContextCurrent()
 
-	window.get
+	
 
 	// Initialize gl
 	if err := gl.Init(); err != nil {
