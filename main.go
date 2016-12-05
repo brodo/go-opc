@@ -14,9 +14,7 @@ import
 (
 	"fmt"
 
-	"./shader"
-	//"github.com/brodo/go-opc/shader"
-	//"github.com/brodo/go-opc/display"
+	"github.com/brodo/go-opc/shader"
 )
 
 func main() {

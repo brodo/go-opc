@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	//"github.com/brodo/go-opc/display"
-	"../display"
+	"github.com/brodo/go-opc/display"
 	"github.com/brodo/go-opc/message"
 	"github.com/brodo/go-opc/pixel"
 	"github.com/go-gl/gl/v4.1-core/gl"
@@ -56,7 +55,8 @@ func Start() {
 	window.MakeContextCurrent()
 
 	// Initialize gl
-	if err := gl.Init(); err != nil {
+	err = gl.Init()
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func Start() {
 
 	gl.ClearColor(1.0, 1.0, 1.0, 1.0)
 	// load shaders
-	programID, err := newProgram("shader/vertexShader.vertexshader", "shader/fragmentShader.fragmentshader")
+	prog, err := NewProgram("shader/vertexShader.vertexshader", "shader/fragmentShader.fragmentshader")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -96,14 +96,25 @@ func Start() {
 
 	gl.ClearColor(0.11, 0.545, 0.765, 0.0)
 
-	for !window.ShouldClose() {
+	t0 := NanosNow()
 
+	for !window.ShouldClose() {
 		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-		gl.UseProgram(programID)
+		gl.UseProgram(prog)
+
+		iResolutionIndex := gl.GetUniformLocation(prog, gl.Str("iResolution\x00"))
+		if iResolutionIndex >= 0 {
+			gl.Uniform2f(iResolutionIndex, float32(FB_RES_X), float32(FB_RES_Y))
+		}
+
+		iGlobalTimeIndex := gl.GetUniformLocation(prog, gl.Str("iGlobalTime\x00"))
+		if iGlobalTimeIndex >= 0 {
+			gl.Uniform1f(iGlobalTimeIndex, float32(NanosNow()-t0)/1000000000.0)
+		}
 
 		gl.EnableVertexAttribArray(0)
-		gl.BindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
 
+		gl.BindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
 		gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
 
 		gl.DrawArrays(gl.TRIANGLES, 0, 6)
@@ -114,11 +125,14 @@ func Start() {
 
 		for x := 0; x < RES_X; x++ {
 			for y := 0; y < RES_Y; y++ {
-				pixel := pixel.Pixel{0, 0, 0}
 				buf_pos := y*SCALE_Y*FB_RES_X*4 + x*SCALE_X*4
-				pixel.Red = float64(pixels[buf_pos]) / 255.0
-				pixel.Green = float64(pixels[buf_pos+1]) / 255.0
-				pixel.Blue = float64(pixels[buf_pos+2]) / 255.0
+
+				pixel := pixel.Pixel{
+					Red:   float64(pixels[buf_pos]) / 255.0,
+					Green: float64(pixels[buf_pos+1]) / 255.0,
+					Blue:  float64(pixels[buf_pos+2]) / 255.0,
+				}
+
 				display.SetPixel(pixel, x, y)
 			}
 		}
@@ -126,6 +140,7 @@ func Start() {
 		msg := message.EmptyMessage()
 		msg.SetData(display.GetBuffer().Bytes())
 		binary.Write(conn, binary.BigEndian, msg.ToBytes())
+
 		time.Sleep(4 * time.Millisecond)
 
 		// Maintenance
@@ -134,12 +149,15 @@ func Start() {
 	}
 }
 
+func NanosNow() int64 {
+	return time.Now().UnixNano()
+}
+
 // Create a new program to run. Requires path to vertex shader and fragment
 // shader files
-func newProgram(vertexFilePath, fragmentFilePath string) (uint32, error) {
-
+func NewProgram(vertexFilePath, fragmentFilePath string) (uint32, error) {
 	// Load both shaders
-	vertexShaderID, fragmentShaderID, err := loadShaders(vertexFilePath, fragmentFilePath)
+	vertexShaderID, fragmentShaderID, err := LoadShaders(vertexFilePath, fragmentFilePath)
 	if err != nil {
 		return 0, err
 	}
@@ -175,16 +193,16 @@ func newProgram(vertexFilePath, fragmentFilePath string) (uint32, error) {
 }
 
 // Load both shaders and return
-func loadShaders(vertexFilePath, fragmentFilePath string) (uint32, uint32, error) {
+func LoadShaders(vertexFilePath, fragmentFilePath string) (uint32, uint32, error) {
 
 	// Compile vertex shader
-	vertexShaderID, err := compileShader(readShaderCode(vertexFilePath), gl.VERTEX_SHADER)
+	vertexShaderID, err := CompileShader(ReadShaderCode(vertexFilePath), gl.VERTEX_SHADER)
 	if err != nil {
 		return 0, 0, nil
 	}
 
 	// Compile fragment shader
-	fragmentShaderID, err := compileShader(readShaderCode(fragmentFilePath), gl.FRAGMENT_SHADER)
+	fragmentShaderID, err := CompileShader(ReadShaderCode(fragmentFilePath), gl.FRAGMENT_SHADER)
 	if err != nil {
 		return 0, 0, nil
 	}
@@ -194,17 +212,18 @@ func loadShaders(vertexFilePath, fragmentFilePath string) (uint32, uint32, error
 
 // Compile shader. Source is null terminated c string. shader type is self
 // explanatory
-func compileShader(source string, shaderType uint32) (uint32, error) {
-
+func CompileShader(source string, shaderType uint32) (uint32, error) {
 	// Create new shader
 	shader := gl.CreateShader(shaderType)
 	// Convert shader string to null terminated c string
 	shaderCode, free := gl.Strs(source)
 	defer free()
+
 	gl.ShaderSource(shader, 1, shaderCode, nil)
 
 	// Compile shader
 	gl.CompileShader(shader)
+
 	var status int32
 	gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status)
 	if status == gl.FALSE {
@@ -214,28 +233,33 @@ func compileShader(source string, shaderType uint32) (uint32, error) {
 		log := strings.Repeat("\x00", int(logLength+1))
 		gl.GetShaderInfoLog(shader, logLength, nil, gl.Str(log))
 
-		fmt.Errorf("failed to compile %v: %v", source, log)
+		fmt.Errorf("Failed to compile %v: %v", source, log)
 	}
 
 	return shader, nil
 }
 
 // Read shader code from file
-func readShaderCode(filePath string) string {
+func ReadShaderCode(filePath string) string {
 	code := ""
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		code += "\n" + scanner.Text()
 	}
+
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
+
 	code += "\x00"
+
 	return code
 }
