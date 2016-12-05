@@ -47,7 +47,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-func Start() {
+func Start(shaderFile string) {
 	// Initialize glfw
 	if err := glfw.Init(); err != nil {
 		log.Fatal(err)
@@ -77,7 +77,7 @@ func Start() {
 	version := gl.GoStr(gl.GetString(gl.VERSION))
 	fmt.Println("OpenGL version", version)
 
-	// Triangle verticies
+	// Triangle vertices
 	vertexBufferData := []float32{
 		-1.0, 1.0, 0.0,
 		1.0, 1.0, 0.0,
@@ -98,7 +98,7 @@ func Start() {
 
 	gl.ClearColor(1.0, 1.0, 1.0, 1.0)
 	// load shaders
-	prog, err := NewProgram("shader/vertexShader.vertexshader", "shader/fragmentShader.fragmentshader")
+	prog, err := NewProgram("shader/vertex.glsl", shaderFile)
 	if err != nil {
 		log.Fatal(err)
 	}
