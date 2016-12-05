@@ -4,10 +4,16 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/draw"
+	_ "image/png"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +23,12 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 )
+
+type Texture struct {
+	TexId         uint32
+	TextureNumber uint32
+	ChannelNumber uint32
+}
 
 const SCALE_X = 4
 const SCALE_Y = 4
@@ -28,6 +40,8 @@ const FB_RES_X = SCALE_X * RES_X
 const FB_RES_Y = SCALE_Y * RES_Y
 
 var pixels = make([]byte, FB_RES_X*FB_RES_Y*4)
+var textureCount = uint32(0)
+var textures = make([]Texture, 0)
 
 func init() {
 	runtime.LockOSThread()
@@ -89,6 +103,19 @@ func Start() {
 		log.Fatal(err)
 	}
 
+	files, _ := filepath.Glob("*")
+	for _, file := range files {
+		r, _ := regexp.Compile("\\.chan([0-9]+)")
+		matches := r.FindStringSubmatch(file)
+
+		if len(matches) > 0 {
+			fmt.Println(matches[1])
+			if number, err := strconv.Atoi(matches[1]); err == nil {
+				textures = append(textures, MakeTexture(file, uint32(number)))
+			}
+		}
+	}
+
 	conn, err := net.Dial("tcp", "10.23.42.141:7890")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Could not connect to server")
@@ -110,6 +137,18 @@ func Start() {
 		iGlobalTimeIndex := gl.GetUniformLocation(prog, gl.Str("iGlobalTime\x00"))
 		if iGlobalTimeIndex >= 0 {
 			gl.Uniform1f(iGlobalTimeIndex, float32(NanosNow()-t0)/1000000000.0)
+		}
+
+		for _, texture := range textures {
+			iChannelNumber := texture.ChannelNumber
+			iChannelStr := fmt.Sprintf("iChannel%d\x00", iChannelNumber)
+			iChannelIndex := gl.GetUniformLocation(prog, gl.Str(iChannelStr))
+
+			if iChannelIndex >= 0 {
+				gl.ActiveTexture(gl.TEXTURE0 + texture.TextureNumber)
+				gl.BindTexture(gl.TEXTURE_2D, texture.TexId)
+				gl.Uniform1i(iChannelIndex, int32(texture.TextureNumber))
+			}
 		}
 
 		gl.EnableVertexAttribArray(0)
@@ -262,4 +301,50 @@ func ReadShaderCode(filePath string) string {
 	code += "\x00"
 
 	return code
+}
+
+func MakeTexture(file string, channelNumber uint32) Texture {
+	imgFile, err := os.Open(file)
+	if err != nil {
+		log.Fatalf("texture %q not found on disk: %v\n", file, err)
+	}
+	img, _, err := image.Decode(imgFile)
+	if err != nil {
+		panic(err)
+	}
+
+	rgba := image.NewRGBA(img.Bounds())
+	if rgba.Stride != rgba.Rect.Size().X*4 {
+		panic("Unsupported stride!")
+	}
+	draw.Draw(rgba, rgba.Bounds(), img, image.Point{0, 0}, draw.Src)
+
+	var texId uint32
+	gl.Enable(gl.TEXTURE_2D)
+	gl.GenTextures(1, &texId)
+	gl.BindTexture(gl.TEXTURE_2D, texId)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	gl.TexImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGBA,
+		int32(rgba.Rect.Size().X),
+		int32(rgba.Rect.Size().Y),
+		0,
+		gl.RGBA,
+		gl.UNSIGNED_BYTE,
+		gl.Ptr(rgba.Pix))
+
+	texture := Texture{
+		TexId:         texId,
+		TextureNumber: textureCount,
+		ChannelNumber: channelNumber,
+	}
+
+	textureCount++
+
+	return texture
 }
