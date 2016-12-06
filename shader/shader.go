@@ -47,7 +47,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-func Start(shaderFile string) {
+func Start(shaderFile string, opcTarget string) {
 	// Initialize glfw
 	if err := glfw.Init(); err != nil {
 		log.Fatal(err)
@@ -97,6 +97,7 @@ func Start(shaderFile string) {
 	gl.BufferData(gl.ARRAY_BUFFER, len(vertexBufferData)*4, gl.Ptr(vertexBufferData), gl.STATIC_DRAW)
 
 	gl.ClearColor(1.0, 1.0, 1.0, 1.0)
+
 	// load shaders
 	prog, err := NewProgram("shader/vertex.glsl", shaderFile)
 	if err != nil {
@@ -116,7 +117,7 @@ func Start(shaderFile string) {
 		}
 	}
 
-	conn, err := net.Dial("tcp", "10.23.42.141:7890")
+	conn, err := net.Dial("tcp", opcTarget)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Could not connect to server")
 	}
